@@ -14,7 +14,8 @@ import MemberCard from "@/components/member-card";
 import FamilyCard from "@/components/family-card";
 import CompanionshipCard from "@/components/companionship-card";
 import ReportModal from "@/components/report-modal";
-import { useDragAndDrop } from "@/hooks/use-drag-and-drop";
+import NewCompanionshipDropZone from "@/components/new-companionship-drop-zone";
+import SortableList from "@/components/sortable-list";
 import type { Member, Family, CompanionshipWithMembers } from "@shared/schema";
 
 export default function MinisteringDashboard() {
@@ -89,22 +90,34 @@ export default function MinisteringDashboard() {
     },
   });
 
-  const { handleDrop } = useDragAndDrop({
-    members,
-    families,
-    companionships,
-    onCreateCompanionship: createCompanionshipMutation.mutate,
-    onAssignFamily: assignFamilyMutation.mutate,
-    isProposeMode,
-  });
+  // Sorting states
+  const [memberSort, setMemberSort] = useState<"asc" | "desc" | null>(null);
+  const [familySort, setFamilySort] = useState<"asc" | "desc" | null>(null);
+  const [companionshipSort, setCompanionshipSort] = useState<"asc" | "desc" | null>(null);
 
-  const unassignedMembers = members.filter(member => 
-    !companionships.some(comp => 
-      comp.seniorCompanionId === member.id || comp.juniorCompanionId === member.id
-    )
+  const sortItems = <T extends { name: string }>(items: T[], direction: "asc" | "desc" | null): T[] => {
+    if (!direction) return items;
+    return [...items].sort((a, b) => {
+      const comparison = a.name.localeCompare(b.name);
+      return direction === "asc" ? comparison : -comparison;
+    });
+  };
+
+  const unassignedMembers = sortItems(
+    members.filter(member => 
+      !companionships.some(comp => 
+        comp.seniorCompanionId === member.id || comp.juniorCompanionId === member.id
+      )
+    ),
+    memberSort
   );
 
-  const unassignedFamilies = families.filter(family => !family.companionshipId);
+  const unassignedFamilies = sortItems(
+    families.filter(family => !family.companionshipId),
+    familySort
+  );
+
+  const sortedCompanionships = sortItems(companionships, companionshipSort);
 
   const proposedChangesCount = companionships.filter(comp => comp.isProposed).length;
 
@@ -208,14 +221,16 @@ export default function MinisteringDashboard() {
                 <p className="text-sm text-slate-500 mt-1">Drag members to create companionships</p>
               </div>
               
-              <div 
-                className="p-4 min-h-[200px]"
-                onDrop={(e) => handleDrop(e, "unassigned")}
-                onDragOver={(e) => e.preventDefault()}
-              >
-                {unassignedMembers.map(member => (
-                  <MemberCard key={member.id} member={member} />
-                ))}
+              <div className="p-4 min-h-[200px]">
+                <SortableList
+                  title=""
+                  onSort={(direction) => setMemberSort(direction)}
+                  showSort={false}
+                >
+                  {unassignedMembers.map(member => (
+                    <MemberCard key={member.id} member={member} />
+                  ))}
+                </SortableList>
               </div>
 
               <div className="p-4 border-t border-slate-200">

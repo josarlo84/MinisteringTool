@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import type { Member, Family, CompanionshipWithMembers } from "@shared/schema";
 
 interface UseDragAndDropProps {
@@ -14,6 +14,11 @@ interface UseDragAndDropProps {
   isProposeMode: boolean;
 }
 
+interface DraggedMember {
+  id: number;
+  member: Member;
+}
+
 export function useDragAndDrop({
   members,
   families,
@@ -23,38 +28,61 @@ export function useDragAndDrop({
   isProposeMode,
 }: UseDragAndDropProps) {
   
-  const handleDrop = useCallback((
-    e: React.DragEvent,
-    dropZone: string,
-    companionshipId?: number
-  ) => {
-    e.preventDefault();
-    
-    const dragData = e.dataTransfer.getData("text/plain");
-    if (!dragData) return;
-    
-    try {
-      const item = JSON.parse(dragData);
+  const [draggedMembers, setDraggedMembers] = useState<DraggedMember[]>([]);
+  
+  const handleMemberDrop = useCallback((item: any, dropZone: string, companionshipId?: number) => {
+    if (dropZone === "new-companionship" && item.type === "member") {
+      // Add member to temporary collection for companionship creation
+      const newDraggedMember = { id: item.data.id, member: item.data };
+      const updatedDraggedMembers = [...draggedMembers, newDraggedMember];
+      setDraggedMembers(updatedDraggedMembers);
       
-      if (dropZone === "companionship" && item.type === "family" && companionshipId) {
-        // Assign family to companionship
-        onAssignFamily({ familyId: item.data.id, companionshipId });
-      } else if (dropZone === "families" && item.type === "family") {
-        // Unassign family from companionship
-        onAssignFamily({ familyId: item.data.id, companionshipId: null });
-      } else if (dropZone === "new-companionship" && item.type === "member") {
-        // For now, create a single-member companionship
-        // In a real implementation, you'd want to handle dropping 2 members
-        const companionshipName = `Companionship with ${item.data.name}`;
+      // If we have 2 members, create companionship
+      if (updatedDraggedMembers.length >= 2) {
+        const [senior, junior] = updatedDraggedMembers;
+        const companionshipName = `${senior.member.name} & ${junior.member.name}`;
         onCreateCompanionship({
           name: companionshipName,
-          seniorCompanionId: item.data.id,
+          seniorCompanionId: senior.id,
+          juniorCompanionId: junior.id,
         });
+        setDraggedMembers([]);
+      } else if (updatedDraggedMembers.length === 1) {
+        // Create single-member companionship after short delay to allow for second member
+        setTimeout(() => {
+          setDraggedMembers(current => {
+            if (current.length === 1) {
+              const companionshipName = `${current[0].member.name}'s Companionship`;
+              onCreateCompanionship({
+                name: companionshipName,
+                seniorCompanionId: current[0].id,
+              });
+              return [];
+            }
+            return current;
+          });
+        }, 1000);
       }
-    } catch (error) {
-      console.error("Failed to parse drag data:", error);
     }
-  }, [onCreateCompanionship, onAssignFamily]);
+  }, [draggedMembers, onCreateCompanionship]);
 
-  return { handleDrop };
+  const handleFamilyDrop = useCallback((item: any, dropZone: string, companionshipId?: number) => {
+    if (dropZone === "companionship" && item.type === "family" && companionshipId) {
+      // Assign family to companionship
+      onAssignFamily({ familyId: item.data.id, companionshipId });
+    } else if (dropZone === "families" && item.type === "family") {
+      // Unassign family from companionship
+      onAssignFamily({ familyId: item.data.id, companionshipId: null });
+    }
+  }, [onAssignFamily]);
+
+  const handleDrop = useCallback((item: any, dropZone: string, companionshipId?: number) => {
+    if (item.type === "member") {
+      handleMemberDrop(item, dropZone, companionshipId);
+    } else if (item.type === "family") {
+      handleFamilyDrop(item, dropZone, companionshipId);
+    }
+  }, [handleMemberDrop, handleFamilyDrop]);
+
+  return { handleDrop, draggedMembers };
 }

@@ -9,7 +9,6 @@ import type { CompanionshipWithMembers } from "@shared/schema";
 
 interface CompanionshipCardProps {
   companionship: CompanionshipWithMembers;
-  onDrop: (e: React.DragEvent, dropZone: string, companionshipId?: number) => void;
 }
 
 export default function CompanionshipCard({ companionship, onDrop }: CompanionshipCardProps) {
