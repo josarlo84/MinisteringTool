@@ -4,16 +4,64 @@ import { useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
-import { Handshake, User, Home, X } from "lucide-react";
-import type { CompanionshipWithMembers } from "@shared/schema";
+import { Handshake, User, Home, X, GripVertical } from "lucide-react";
+import type { CompanionshipWithMembers, Member } from "@shared/schema";
+import { useDrag } from "react-dnd";
 
 interface CompanionshipCardProps {
   companionship: CompanionshipWithMembers;
+  onDrop: (item: any, dropZone: string, companionshipId?: number) => void;
+}
+
+// Component for draggable member within a companionship
+function DraggableMember({ 
+  member, 
+  role, 
+  companionshipId 
+}: { 
+  member: Member; 
+  role: 'senior' | 'junior' | 'third';
+  companionshipId: number;
+}) {
+  const [{ isDragging }, drag] = useDrag(() => ({
+    type: "member",
+    item: { 
+      id: member.id, 
+      type: "member", 
+      data: member,
+      fromCompanionshipId: companionshipId,
+      role: role
+    },
+    collect: (monitor) => ({
+      isDragging: monitor.isDragging(),
+    }),
+  }));
+
+  return (
+    <div 
+      ref={drag}
+      className={`flex items-center space-x-2 cursor-move hover:bg-blue-200 rounded-md p-1 transition-all duration-200 ${
+        isDragging ? "opacity-60" : ""
+      }`}
+    >
+      <div className="w-6 h-6 bg-blue-300 rounded-full flex items-center justify-center">
+        <User className="text-blue-700 h-3 w-3" />
+      </div>
+      <span className="text-sm font-medium text-blue-900 flex-1">
+        {member.name}
+      </span>
+      {role === 'senior' && (
+        <span className="text-xs text-blue-600 bg-blue-200 px-2 py-1 rounded-full">
+          Senior
+        </span>
+      )}
+      <GripVertical className="text-blue-400 h-4 w-4" />
+    </div>
+  );
 }
 
 export default function CompanionshipCard({ companionship, onDrop }: CompanionshipCardProps) {
   const { toast } = useToast();
-  const [isOver, setIsOver] = useState(false);
 
   const deleteCompanionshipMutation = useMutation({
     mutationFn: () => apiRequest("DELETE", `/api/companionships/${companionship.id}`),
@@ -34,13 +82,34 @@ export default function CompanionshipCard({ companionship, onDrop }: Companionsh
     },
   });
 
-  const [{ canDrop }, drop] = useDrop(() => ({
-    accept: "family",
+  const [{ canDrop, isOver }, drop] = useDrop(() => ({
+    accept: ["family", "member"],
     drop: (item: any) => {
-      onDrop({} as React.DragEvent, "companionship", companionship.id);
+      onDrop(item, "companionship", companionship.id);
+    },
+    canDrop: (item: any) => {
+      // For family items, always allow drop
+      if (item.type === "family") {
+        return true;
+      }
+      
+      // For member items, check if the companionship already has 3 members
+      const memberCount = [
+        companionship.seniorCompanion, 
+        companionship.juniorCompanion, 
+        companionship.thirdCompanion
+      ].filter(Boolean).length;
+      
+      // Don't allow dropping if the member is already in this companionship
+      if (item.fromCompanionshipId === companionship.id) {
+        return false;
+      }
+      
+      return memberCount < 3;
     },
     collect: (monitor) => ({
       canDrop: monitor.canDrop(),
+      isOver: monitor.isOver(),
     }),
   }));
 
@@ -75,26 +144,26 @@ export default function CompanionshipCard({ companionship, onDrop }: Companionsh
       
       {/* Ministering Partners */}
       <div className="p-3 space-y-2">
-        <div className="flex items-center space-x-2">
-          <div className="w-6 h-6 bg-blue-300 rounded-full flex items-center justify-center">
-            <User className="text-blue-700 h-3 w-3" />
-          </div>
-          <span className="text-sm font-medium text-blue-900">
-            {companionship.seniorCompanion.name}
-          </span>
-          <span className="text-xs text-blue-600 bg-blue-200 px-2 py-1 rounded-full">
-            Senior
-          </span>
-        </div>
+        <DraggableMember 
+          member={companionship.seniorCompanion} 
+          role="senior" 
+          companionshipId={companionship.id} 
+        />
+        
         {companionship.juniorCompanion && (
-          <div className="flex items-center space-x-2">
-            <div className="w-6 h-6 bg-blue-300 rounded-full flex items-center justify-center">
-              <User className="text-blue-700 h-3 w-3" />
-            </div>
-            <span className="text-sm font-medium text-blue-900">
-              {companionship.juniorCompanion.name}
-            </span>
-          </div>
+          <DraggableMember 
+            member={companionship.juniorCompanion} 
+            role="junior" 
+            companionshipId={companionship.id} 
+          />
+        )}
+        
+        {companionship.thirdCompanion && (
+          <DraggableMember 
+            member={companionship.thirdCompanion} 
+            role="third" 
+            companionshipId={companionship.id} 
+          />
         )}
       </div>
 

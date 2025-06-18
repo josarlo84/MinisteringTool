@@ -31,6 +31,7 @@ export interface IStorage {
   getCompanionshipWithMembers(id: number): Promise<CompanionshipWithMembers | undefined>;
   getAllCompanionshipsWithMembers(): Promise<CompanionshipWithMembers[]>;
   createCompanionship(companionship: InsertCompanionship): Promise<Companionship>;
+  updateCompanionship(id: number, updates: InsertCompanionship): Promise<Companionship | undefined>;
   deleteCompanionship(id: number): Promise<void>;
 
   // Assignment operations
@@ -158,6 +159,9 @@ export class MemStorage implements IStorage {
     const juniorCompanion = companionship.juniorCompanionId 
       ? this.members.get(companionship.juniorCompanionId) 
       : undefined;
+    const thirdCompanion = companionship.thirdCompanionId
+      ? this.members.get(companionship.thirdCompanionId)
+      : undefined;
     
     if (!seniorCompanion) return undefined;
 
@@ -168,6 +172,7 @@ export class MemStorage implements IStorage {
       ...companionship,
       seniorCompanion,
       juniorCompanion,
+      thirdCompanion,
       assignedFamilies,
     };
   }
@@ -191,6 +196,15 @@ export class MemStorage implements IStorage {
     const companionship: Companionship = { ...insertCompanionship, id };
     this.companionships.set(id, companionship);
     return companionship;
+  }
+  
+  async updateCompanionship(id: number, updates: InsertCompanionship): Promise<Companionship | undefined> {
+    const companionship = this.companionships.get(id);
+    if (!companionship) return undefined;
+    
+    const updatedCompanionship = { ...companionship, ...updates };
+    this.companionships.set(id, updatedCompanionship);
+    return updatedCompanionship;
   }
 
   async deleteCompanionship(id: number): Promise<void> {

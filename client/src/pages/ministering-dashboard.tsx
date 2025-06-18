@@ -16,6 +16,7 @@ import CompanionshipCard from "@/components/companionship-card";
 import ReportModal from "@/components/report-modal";
 import NewCompanionshipDropZone from "@/components/new-companionship-drop-zone";
 import SortableList from "@/components/sortable-list";
+import { useDragAndDrop } from "@/hooks/use-drag-and-drop";
 import type { Member, Family, CompanionshipWithMembers } from "@shared/schema";
 
 export default function MinisteringDashboard() {
@@ -62,12 +63,35 @@ export default function MinisteringDashboard() {
   });
 
   const createCompanionshipMutation = useMutation({
-    mutationFn: (companionshipData: { name: string; seniorCompanionId: number; juniorCompanionId?: number }) =>
+    mutationFn: (companionshipData: { 
+      name: string; 
+      seniorCompanionId: number; 
+      juniorCompanionId?: number;
+      thirdCompanionId?: number;
+    }) =>
       apiRequest("POST", "/api/companionships", { ...companionshipData, isProposed: isProposeMode }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/companionships"] });
       queryClient.invalidateQueries({ queryKey: ["/api/members"] });
       toast({ title: "Companionship created successfully" });
+    },
+  });
+  
+  const updateCompanionshipMutation = useMutation({
+    mutationFn: ({ id, data }: { 
+      id: number, 
+      data: { 
+        name: string; 
+        seniorCompanionId: number; 
+        juniorCompanionId?: number;
+        thirdCompanionId?: number;
+      }
+    }) =>
+      apiRequest("PUT", `/api/companionships/${id}`, { ...data, isProposed: isProposeMode }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/companionships"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/members"] });
+      toast({ title: "Companionship updated successfully" });
     },
   });
 
@@ -103,13 +127,24 @@ export default function MinisteringDashboard() {
     });
   };
 
-  const unassignedMembers = sortItems(
-    members.filter(member => 
-      !companionships.some(comp => 
-        comp.seniorCompanionId === member.id || comp.juniorCompanionId === member.id
-      )
-    ),
-    memberSort
+  // Get all members, sorted
+  const allMembers = sortItems(members, memberSort);
+  
+  // Separate members into assigned and unassigned
+  const assignedMembers = allMembers.filter(member => 
+    companionships.some(comp => 
+      comp.seniorCompanionId === member.id || 
+      comp.juniorCompanionId === member.id ||
+      comp.thirdCompanionId === member.id
+    )
+  );
+  
+  const unassignedMembers = allMembers.filter(member => 
+    !companionships.some(comp => 
+      comp.seniorCompanionId === member.id || 
+      comp.juniorCompanionId === member.id ||
+      comp.thirdCompanionId === member.id
+    )
   );
 
   const unassignedFamilies = sortItems(
@@ -120,6 +155,105 @@ export default function MinisteringDashboard() {
   const sortedCompanionships = sortItems(companionships, companionshipSort);
 
   const proposedChangesCount = companionships.filter(comp => comp.isProposed).length;
+
+  // Mutation for removing a member from a companionship
+  const removeMemberFromCompanionshipMutation = useMutation({
+    mutationFn: ({ companionshipId, memberId, role }: { companionshipId: number; memberId: number; role: string }) => {
+      const companionship = companionships.find(comp => comp.id === companionshipId);
+      if (!companionship) throw new Error("Companionship not found");
+      
+      // Create updated companionship data
+      const updatedData: any = {
+        name: companionship.name,
+        seniorCompanionId: companionship.seniorCompanionId,
+        juniorCompanionId: companionship.juniorCompanionId,
+        thirdCompanionId: companionship.thirdCompanionId,
+      };
+      
+      // Remove the member from the appropriate position
+      if (role === 'senior') {
+        // If senior is removed, promote junior to senior if exists
+        if (companionship.juniorCompanionId) {
+          updatedData.seniorCompanionId = companionship.juniorCompanionId;
+          // Make sure we don't have the same member as both senior and junior
+          updatedData.juniorCompanionId = companionship.thirdCompanionId;
+          updatedData.thirdCompanionId = null;
+          
+          // Update name
+          if (companionship.juniorCompanion && companionship.thirdCompanion) {
+            updatedData.name = `${companionship.juniorCompanion.name} & ${companionship.thirdCompanion.name}`;
+          } else if (companionship.juniorCompanion) {
+            updatedData.name = `${companionship.juniorCompanion.name}'s Companionship`;
+          }
+        } else {
+          // If no junior, delete the companionship
+          return apiRequest("DELETE", `/api/companionships/${companionshipId}`);
+        }
+      } else if (role === 'junior') {
+        // Remove junior, promote third if exists
+        updatedData.juniorCompanionId = companionship.thirdCompanionId;
+        updatedData.thirdCompanionId = null;
+        
+        // Update name
+        if (companionship.seniorCompanion && companionship.thirdCompanion) {
+          updatedData.name = `${companionship.seniorCompanion.name} & ${companionship.thirdCompanion.name}`;
+        } else if (companionship.seniorCompanion) {
+          updatedData.name = `${companionship.seniorCompanion.name}'s Companionship`;
+        }
+      } else if (role === 'third') {
+        // Simply remove third companion
+        updatedData.thirdCompanionId = null;
+        
+        // Update name
+        if (companionship.seniorCompanion && companionship.juniorCompanion) {
+          updatedData.name = `${companionship.seniorCompanion.name} & ${companionship.juniorCompanion.name}`;
+        }
+      }
+      
+      // Final check to ensure no duplicate members in companionship
+      if (updatedData.juniorCompanionId === updatedData.seniorCompanionId) {
+        updatedData.juniorCompanionId = null;
+      }
+      if (updatedData.thirdCompanionId === updatedData.seniorCompanionId || 
+          updatedData.thirdCompanionId === updatedData.juniorCompanionId) {
+        updatedData.thirdCompanionId = null;
+      }
+      
+      // If only senior companion remains, update the name
+      if (updatedData.seniorCompanionId && !updatedData.juniorCompanionId && !updatedData.thirdCompanionId) {
+        const seniorMember = members.find(m => m.id === updatedData.seniorCompanionId);
+        if (seniorMember) {
+          updatedData.name = `${seniorMember.name}'s Companionship`;
+        }
+      }
+      
+      // If no members left, delete the companionship
+      if (!updatedData.seniorCompanionId) {
+        return apiRequest("DELETE", `/api/companionships/${companionshipId}`);
+      }
+      
+      // Update the companionship
+      return apiRequest("PUT", `/api/companionships/${companionshipId}`, updatedData);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/companionships"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/members"] });
+      toast({ title: "Member removed from companionship" });
+    },
+  });
+
+  // Use the drag and drop hook
+  const { handleDrop } = useDragAndDrop({
+    members,
+    families,
+    companionships,
+    onCreateCompanionship: (data) => createCompanionshipMutation.mutate(data),
+    onUpdateCompanionship: (id, data) => updateCompanionshipMutation.mutate({ id, data }),
+    onAssignFamily: (data) => assignFamilyMutation.mutate(data),
+    onRemoveMemberFromCompanionship: (companionshipId, memberId, role) => 
+      removeMemberFromCompanionshipMutation.mutate({ companionshipId, memberId, role }),
+    isProposeMode,
+  });
 
   const handleAddMember = () => {
     if (newMember.name && newMember.role) {
@@ -206,31 +340,96 @@ export default function MinisteringDashboard() {
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             
-            {/* Unassigned Members Section */}
+            {/* Members Section */}
             <div className="bg-white rounded-xl shadow-sm border border-slate-200">
               <div className="p-4 border-b border-slate-200">
                 <div className="flex items-center justify-between">
                   <h2 className="text-lg font-semibold text-slate-900 flex items-center">
                     <Users className="text-slate-400 mr-2 h-5 w-5" />
-                    Unassigned Members
+                    Members
                   </h2>
                   <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded-full text-xs font-medium">
-                    {unassignedMembers.length}
+                    {members.length}
                   </span>
                 </div>
-                <p className="text-sm text-slate-500 mt-1">Drag members to create companionships</p>
+                <p className="text-sm text-slate-500 mt-1">Drag members to create or modify companionships</p>
               </div>
               
-              <div className="p-4 min-h-[200px]">
-                <SortableList
-                  title=""
-                  onSort={(direction) => setMemberSort(direction)}
-                  showSort={false}
-                >
-                  {unassignedMembers.map(member => (
-                    <MemberCard key={member.id} member={member} />
-                  ))}
-                </SortableList>
+              <div 
+                className="p-4 min-h-[200px] border-2 border-dashed border-transparent transition-all duration-200 overflow-y-auto max-h-[600px]"
+                onDrop={(e) => {
+                  const data = JSON.parse(e.dataTransfer.getData("application/json"));
+                  handleDrop(data, "members");
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.currentTarget.classList.add("border-slate-300", "bg-slate-50");
+                }}
+                onDragLeave={(e) => {
+                  e.currentTarget.classList.remove("border-slate-300", "bg-slate-50");
+                }}
+                onDragEnd={(e) => {
+                  e.currentTarget.classList.remove("border-slate-300", "bg-slate-50");
+                }}
+              >
+                {/* Unassigned Members Section */}
+                <div className="mb-6">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-md font-medium text-slate-800">Unassigned Members</h3>
+                    <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded-full text-xs font-medium">
+                      {unassignedMembers.length}
+                    </span>
+                  </div>
+                  <SortableList
+                    title=""
+                    onSort={(direction) => setMemberSort(direction)}
+                    showSort={false}
+                  >
+                    {unassignedMembers.map(member => (
+                      <MemberCard key={member.id} member={member} />
+                    ))}
+                  </SortableList>
+                  {unassignedMembers.length === 0 && (
+                    <p className="text-sm text-slate-500 italic text-center py-3">No unassigned members</p>
+                  )}
+                </div>
+                
+                {/* Assigned Members Section */}
+                <div className="mt-4 pt-4 border-t border-slate-200">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-md font-medium text-slate-800">Assigned Members</h3>
+                    <span className="bg-blue-100 text-blue-600 px-2 py-1 rounded-full text-xs font-medium">
+                      {assignedMembers.length}
+                    </span>
+                  </div>
+                  <SortableList
+                    title=""
+                    onSort={(direction) => setMemberSort(direction)}
+                    showSort={false}
+                  >
+                    {assignedMembers.map(member => (
+                      <MemberCard 
+                        key={member.id} 
+                        member={member} 
+                        fromCompanionshipId={
+                          companionships.find(comp => 
+                            comp.seniorCompanionId === member.id || 
+                            comp.juniorCompanionId === member.id || 
+                            comp.thirdCompanionId === member.id
+                          )?.id
+                        }
+                        role={
+                          companionships.find(comp => comp.seniorCompanionId === member.id) ? 'senior' :
+                          companionships.find(comp => comp.juniorCompanionId === member.id) ? 'junior' :
+                          companionships.find(comp => comp.thirdCompanionId === member.id) ? 'third' : undefined
+                        }
+                      />
+                    ))}
+                  </SortableList>
+                  {assignedMembers.length === 0 && (
+                    <p className="text-sm text-slate-500 italic text-center py-3">No assigned members</p>
+                  )}
+                </div>
               </div>
 
               <div className="p-4 border-t border-slate-200">
@@ -288,10 +487,16 @@ export default function MinisteringDashboard() {
                     {companionships.length}
                   </span>
                 </div>
-                <p className="text-sm text-slate-500 mt-1">Drag families here to assign visits</p>
+                <p className="text-sm text-slate-500 mt-1">Drag members or families here to create or assign</p>
               </div>
               
               <div className="p-4 space-y-4">
+                {/* Create New Companionship Drop Zone - Always at the top */}
+                <NewCompanionshipDropZone 
+                  onCreateCompanionship={(data) => createCompanionshipMutation.mutate(data)} 
+                />
+                
+                {/* Existing Companionships */}
                 {companionships.map(companionship => (
                   <CompanionshipCard 
                     key={companionship.id} 
@@ -299,16 +504,6 @@ export default function MinisteringDashboard() {
                     onDrop={handleDrop}
                   />
                 ))}
-
-                {/* Create New Companionship Drop Zone */}
-                <div 
-                  className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center bg-slate-50 hover:bg-slate-100 transition-colors duration-200 min-h-[100px] flex flex-col items-center justify-center"
-                  onDrop={(e) => handleDrop(e, "new-companionship")}
-                  onDragOver={(e) => e.preventDefault()}
-                >
-                  <Plus className="text-slate-400 text-2xl mb-2" />
-                  <p className="text-sm text-slate-500 font-medium">Drop two members here to create a new companionship</p>
-                </div>
               </div>
             </div>
 

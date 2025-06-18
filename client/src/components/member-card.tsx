@@ -4,12 +4,20 @@ import type { Member } from "@shared/schema";
 
 interface MemberCardProps {
   member: Member;
+  fromCompanionshipId?: number;
+  role?: 'senior' | 'junior' | 'third';
 }
 
-export default function MemberCard({ member }: MemberCardProps) {
+export default function MemberCard({ member, fromCompanionshipId, role }: MemberCardProps) {
   const [{ isDragging }, drag] = useDrag(() => ({
     type: "member",
-    item: { id: member.id, type: "member", data: member },
+    item: { 
+      id: member.id, 
+      type: "member", 
+      data: member,
+      fromCompanionshipId,
+      role
+    },
     collect: (monitor) => ({
       isDragging: monitor.isDragging(),
     }),

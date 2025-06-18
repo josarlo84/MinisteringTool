@@ -20,6 +20,7 @@ export const companionships = pgTable("companionships", {
   name: text("name").notNull(),
   seniorCompanionId: integer("senior_companion_id").notNull(),
   juniorCompanionId: integer("junior_companion_id"),
+  thirdCompanionId: integer("third_companion_id"),
   isProposed: boolean("is_proposed").default(false),
 });
 
@@ -48,5 +49,6 @@ export type Companionship = typeof companionships.$inferSelect;
 export type CompanionshipWithMembers = Companionship & {
   seniorCompanion: Member;
   juniorCompanion?: Member;
+  thirdCompanion?: Member;
   assignedFamilies: Family[];
 };
